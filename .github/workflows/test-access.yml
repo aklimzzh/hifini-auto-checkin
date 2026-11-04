@@ -1,0 +1,124 @@
+name: Test Exchange Access
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-access:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Show runner public IP
+        run: |
+          echo "Runner public IP:"
+          curl -s https://api.ipify.org
+          echo
+
+      - name: Test SSE homepage
+        run: |
+          echo "=== SSE Homepage ==="
+
+          curl \
+            --location \
+            --connect-timeout 15 \
+            --max-time 30 \
+            --user-agent "Mozilla/5.0" \
+            --write-out "\nHTTP=%{http_code}\nSIZE=%{size_download}\nTIME=%{time_total}s\n" \
+            --output /tmp/sse.html \
+            "https://www.sse.com.cn/"
+
+          head -c 200 /tmp/sse.html
+          echo
+
+      - name: Test SSE ETF page
+        run: |
+          echo "=== SSE ETF Page ==="
+
+          curl \
+            --location \
+            --connect-timeout 15 \
+            --max-time 30 \
+            --user-agent "Mozilla/5.0" \
+            --referer "https://www.sse.com.cn/" \
+            --write-out "\nHTTP=%{http_code}\nSIZE=%{size_download}\nTIME=%{time_total}s\n" \
+            --output /tmp/sse-etf.html \
+            "https://www.sse.com.cn/market/funddata/volumn/etfvolumn/"
+
+          head -c 200 /tmp/sse-etf.html
+          echo
+
+      - name: Test SZSE homepage
+        run: |
+          echo "=== SZSE Homepage ==="
+
+          curl \
+            --location \
+            --connect-timeout 15 \
+            --max-time 30 \
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36" \
+            --write-out "\nHTTP=%{http_code}\nSIZE=%{size_download}\nTIME=%{time_total}s\n" \
+            --output /tmp/szse.html \
+            "https://www.szse.cn/"
+
+          head -c 200 /tmp/szse.html
+          echo
+
+      - name: Test SZSE ETF page
+        run: |
+          echo "=== SZSE ETF Page ==="
+
+          curl \
+            --location \
+            --connect-timeout 15 \
+            --max-time 30 \
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36" \
+            --referer "https://www.szse.cn/" \
+            --write-out "\nHTTP=%{http_code}\nSIZE=%{size_download}\nTIME=%{time_total}s\n" \
+            --output /tmp/szse-etf.html \
+            "https://www.szse.cn/market/fund/volume/etf/index.html"
+
+          head -c 200 /tmp/szse-etf.html
+          echo
+
+      - name: Test SZSE XLSX download
+        run: |
+          echo "=== SZSE XLSX ==="
+
+          curl \
+            --location \
+            --connect-timeout 15 \
+            --max-time 60 \
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36" \
+            --referer "https://www.szse.cn/market/fund/volume/etf/index.html" \
+            --write-out "\nHTTP=%{http_code}\nSIZE=%{size_download}\nCONTENT_TYPE=%{content_type}\nTIME=%{time_total}s\n" \
+            --output /tmp/szse-etf.xlsx \
+            "https://www.szse.cn/api/report/ShowReport?SHOWTYPE=xlsx&CATALOGID=scsj_fund_jjgm&TABKEY=tab1&txtStart=2026-11-03&txtEnd=2026-11-03&jjlb=ETF"
+
+          echo
+          echo "File information:"
+          file /tmp/szse-etf.xlsx
+
+          echo
+          echo "File size:"
+          ls -lh /tmp/szse-etf.xlsx
+
+      - name: Validate SZSE XLSX
+        run: |
+          python - <<'PY'
+          import zipfile
+
+          path = "/tmp/szse-etf.xlsx"
+
+          if not zipfile.is_zipfile(path):
+              raise RuntimeError(
+                  "Downloaded file is not a valid XLSX/ZIP file."
+              )
+
+          with zipfile.ZipFile(path) as z:
+              names = z.namelist()
+
+              if "[Content_Types].xml" not in names:
+                  raise RuntimeError("Invalid XLSX structure.")
+
+          print("SZSE XLSX VALIDATION: SUCCESS")
+          PY
