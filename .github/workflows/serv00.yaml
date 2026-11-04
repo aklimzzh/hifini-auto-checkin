@@ -1,0 +1,44 @@
+name: Test Serv00 PostgreSQL
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-postgresql:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Test connection
+        env:
+          PGHOST: ${{ secrets.PG_HOST }}
+          PGPORT: ${{ secrets.PG_PORT }}
+          PGDATABASE: ${{ secrets.PG_DATABASE }}
+          PGUSER: ${{ secrets.PG_USER }}
+          PGPASSWORD: ${{ secrets.PG_PASSWORD }}
+        run: |
+          psql -c "SELECT current_database(), current_user, NOW();"
+
+      - name: Test write
+        env:
+          PGHOST: ${{ secrets.PG_HOST }}
+          PGPORT: ${{ secrets.PG_PORT }}
+          PGDATABASE: ${{ secrets.PG_DATABASE }}
+          PGUSER: ${{ secrets.PG_USER }}
+          PGPASSWORD: ${{ secrets.PG_PASSWORD }}
+        run: |
+          psql -c "INSERT INTO connection_test (source, message) VALUES ('github-actions', 'GitHub Actions PostgreSQL connection works');"
+
+      - name: Test read
+        env:
+          PGHOST: ${{ secrets.PG_HOST }}
+          PGPORT: ${{ secrets.PG_PORT }}
+          PGDATABASE: ${{ secrets.PG_DATABASE }}
+          PGUSER: ${{ secrets.PG_USER }}
+          PGPASSWORD: ${{ secrets.PG_PASSWORD }}
+        run: |
+          psql -c "SELECT * FROM connection_test ORDER BY id;"
