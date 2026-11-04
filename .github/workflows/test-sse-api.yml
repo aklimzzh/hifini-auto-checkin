@@ -1,0 +1,276 @@
+name: Test SSE ETF API
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-sse:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Show runner information
+        run: |
+          echo "Runner public IP:"
+          curl --silent https://api.ipify.org
+          echo
+          echo "Current UTC time:"
+          date -u
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pandas
+
+      - name: Test SSE ETF JSON API
+        run: |
+          python - <<'PY'
+          import json
+          import sys
+          import time
+
+          import requests
+
+
+          API_URL = "https://query.sse.com.cn/commonQuery.do"
+
+          HEADERS = {
+              "User-Agent": (
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/130.0.0.0 Safari/537.36"
+              ),
+              "Referer": (
+                  "https://www.sse.com.cn/"
+                  "market/funddata/volumn/etfvolumn/"
+              ),
+              "Accept": (
+                  "application/json, text/javascript, "
+                  "*/*; q=0.01"
+              ),
+              "Accept-Language": (
+                  "zh-CN,zh;q=0.9,en;q=0.8"
+              ),
+              "Connection": "keep-alive",
+          }
+
+          PARAMS = {
+              "sqlId": (
+                  "COMMON_SSE_ZQPZ_ETFZL_"
+                  "XXPL_ETFGM_SEARCH_L"
+              ),
+              "isPagination": "true",
+              "pageHelp.pageSize": "2000",
+              "pageHelp.pageNo": "1",
+              "pageHelp.beginPage": "1",
+              "pageHelp.endPage": "1",
+              "pageHelp.cacheSize": "1",
+              "_": str(int(time.time() * 1000)),
+          }
+
+          print("=== SSE API REQUEST ===")
+          print(f"URL: {API_URL}")
+          print("Requested page size: 2000")
+
+          session = requests.Session()
+          response = session.get(
+              API_URL,
+              params=PARAMS,
+              headers=HEADERS,
+              timeout=(15, 60),
+          )
+
+          print("\n=== HTTP RESULT ===")
+          print(f"Final URL: {response.url}")
+          print(f"HTTP status: {response.status_code}")
+          print(f"Content-Type: {response.headers.get('Content-Type')}")
+          print(f"Content-Length: {len(response.content)} bytes")
+          print(f"Encoding: {response.encoding}")
+
+          response.raise_for_status()
+
+          try:
+              payload = response.json()
+          except Exception as exc:
+              print("\nERROR: Response is not JSON")
+              print(f"JSON error: {exc}")
+              print("First 500 response characters:")
+              print(response.text[:500])
+              sys.exit(1)
+
+          print("\n=== TOP-LEVEL JSON ===")
+          print(f"Payload type: {type(payload).__name__}")
+
+          if isinstance(payload, dict):
+              print(f"Top-level keys: {list(payload.keys())}")
+          else:
+              print("Top-level result is not a dictionary")
+              print(str(payload)[:1000])
+              sys.exit(1)
+
+          # SSE commonly puts records in "result".
+          records = payload.get("result")
+
+          # Keep a small fallback for possible structural changes.
+          if not isinstance(records, list):
+              for candidate in (
+                  "data",
+                  "rows",
+                  "pageHelp",
+              ):
+                  value = payload.get(candidate)
+
+                  if isinstance(value, list):
+                      records = value
+                      print(
+                          f"Records detected under key: {candidate}"
+                      )
+                      break
+
+          if not isinstance(records, list):
+              print("\nERROR: No record list found.")
+              print("Response preview:")
+              print(
+                  json.dumps(
+                      payload,
+                      ensure_ascii=False,
+                      indent=2,
+                  )[:5000]
+              )
+              sys.exit(1)
+
+          print("\n=== RECORDS ===")
+          print(f"Record count: {len(records)}")
+
+          if not records:
+              print("ERROR: SSE returned zero records.")
+              print(
+                  json.dumps(
+                      payload,
+                      ensure_ascii=False,
+                      indent=2,
+                  )[:5000]
+              )
+              sys.exit(1)
+
+          first = records[0]
+
+          print(f"First record type: {type(first).__name__}")
+
+          if isinstance(first, dict):
+              print(f"First record keys: {list(first.keys())}")
+              print("First three records:")
+              print(
+                  json.dumps(
+                      records[:3],
+                      ensure_ascii=False,
+                      indent=2,
+                  )
+              )
+          else:
+              print("First three records:")
+              print(
+                  json.dumps(
+                      records[:3],
+                      ensure_ascii=False,
+                      indent=2,
+                  )
+              )
+
+          # Basic sanity check, deliberately not fixed at 923.
+          if len(records) < 800:
+              print(
+                  "\nWARNING: Record count is unexpectedly low. "
+                  "Expected approximately 900+ records."
+              )
+          else:
+              print(
+                  "\nSSE API VALIDATION: SUCCESS"
+              )
+
+          # Save diagnostic files for later steps.
+          with open(
+              "/tmp/sse-response.json",
+              "w",
+              encoding="utf-8",
+          ) as file:
+              json.dump(
+                  payload,
+                  file,
+                  ensure_ascii=False,
+                  indent=2,
+              )
+
+          with open(
+              "/tmp/sse-records.json",
+              "w",
+              encoding="utf-8",
+          ) as file:
+              json.dump(
+                  records,
+                  file,
+                  ensure_ascii=False,
+                  indent=2,
+              )
+
+          print("\nDiagnostic JSON files created.")
+          PY
+
+      - name: Convert SSE records to diagnostic CSV
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          import pandas as pd
+
+          input_path = "/tmp/sse-records.json"
+          output_path = "/tmp/sse-etf.csv"
+
+          if not os.path.exists(input_path):
+              raise RuntimeError(
+                  "SSE records JSON was not generated."
+              )
+
+          with open(
+              input_path,
+              "r",
+              encoding="utf-8",
+          ) as file:
+              records = json.load(file)
+
+          frame = pd.DataFrame(records)
+
+          print("=== DATAFRAME INFORMATION ===")
+          print(f"Rows: {len(frame)}")
+          print(f"Columns: {len(frame.columns)}")
+          print("Column names:")
+          print(frame.columns.tolist())
+
+          print("\nFirst five rows:")
+          print(frame.head().to_string())
+
+          frame.to_csv(
+              output_path,
+              index=False,
+              encoding="utf-8-sig",
+          )
+
+          print(f"\nCSV saved: {output_path}")
+          print(
+              f"CSV size: {os.path.getsize(output_path)} bytes"
+          )
+          PY
+
+      - name: Upload SSE diagnostic files
+        uses: actions/upload-artifact@v4
+        with:
+          name: sse-etf-api-test
+          path: |
+            /tmp/sse-response.json
+            /tmp/sse-records.json
+            /tmp/sse-
